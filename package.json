@@ -1,0 +1,31 @@
+{
+  "name": "quote-demo-app",
+  "version": "1.0.0",
+  "description": "Simple Node.js demo app that returns random quotes from a database.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node src/cli.js migrate",
+    "create-admin": "node src/cli.js create-admin",
+    "lint": "node --check src/app.js && node --check src/server.js && node --check src/cli.js && node --check src/config/config.js && node --check src/db/database.js && node --check src/db/migrations.js && node --check src/middleware/logger.js && node --check src/middleware/requestId.js && node --check src/repositories/quoteRepository.js && node --check src/routes/quoteRoutes.js && node --check src/services/quoteService.js && node --check src/public/app.js",
+    "test": "npm run lint"
+  },
+  "keywords": [
+    "nodejs",
+    "express",
+    "docker",
+    "postgres",
+    "sqlite"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.9.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.3"
+  }
+}

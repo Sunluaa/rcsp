@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Random Quote App</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <main class="page">
+      <section class="quote-panel" aria-labelledby="page-title">
+        <p class="eyebrow">Node.js + Express</p>
+        <h1 id="page-title">Random Quote App</h1>
+        <div class="quote-box" aria-live="polite">
+          <p id="quote-text" class="quote-text">Нажмите кнопку, чтобы получить случайную цитату.</p>
+          <p id="quote-author" class="quote-author"></p>
+        </div>
+        <button id="quote-button" type="button">Получить цитату</button>
+        <p id="status-message" class="status-message" role="status"></p>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

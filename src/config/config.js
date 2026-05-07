@@ -33,6 +33,7 @@ module.exports = {
   serviceName: readString('SERVICE_NAME', 'quote-demo-app'),
   port: readNumber('PORT', 8080),
   appVersion: readString('APP_VERSION', '1.0.0'),
+  instanceId: readString('INSTANCE_ID', process.env.HOSTNAME || 'local'),
   dbClient,
   databaseUrl: readString(
     'DATABASE_URL',

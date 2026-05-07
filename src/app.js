@@ -36,6 +36,7 @@ app.get('/health', (req, res) => {
     status: 'ok',
     service: config.serviceName,
     version: config.appVersion,
+    instanceId: config.instanceId,
     environment: config.nodeEnv
   });
 });

@@ -1,240 +1,61 @@
-# quote-demo-app
-
-Учебное веб-приложение на Node.js + Express: страница с кнопкой получает случайную цитату из базы данных через API `/api/quote`.
-
-Проект специально сделан простым, чтобы отдельно показать практики: конфигурация через окружение, миграции, SQLite локально, PostgreSQL в Docker Compose, Docker, JSON-логи, Request ID, graceful shutdown, одноразовые CLI-команды и CI.
-
-## Практика 1. Локальный запуск с SQLite
+# Проверка задания 1
 
 ```bash
-npm ci
-cp .env.example .env
+npm test
 npm run migrate
-npm run start
-```
 
-Для PowerShell вместо `cp`:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Откройте приложение: [http://localhost:8080](http://localhost:8080)
-
-Проверка API:
-
-```bash
-curl http://localhost:8080/api/quote
 curl http://localhost:8080/health
+curl http://localhost:8080/api/quote
 ```
 
-По умолчанию используется SQLite-файл `./data/app.db`. Это удобно для запуска без Docker и без локальной установки PostgreSQL.
+---
 
-## Практика 2. Конфигурация через переменные окружения
-
-Все изменяемые настройки находятся в `.env.example`:
-
-```env
-NODE_ENV=development
-SERVICE_NAME=quote-demo-app
-PORT=8080
-APP_VERSION=1.0.0
-DB_CLIENT=sqlite
-DATABASE_URL=postgres://app_user:app_password@postgres:5432/quotes_db
-SQLITE_FILE=./data/app.db
-LOG_LEVEL=info
-SHUTDOWN_TIMEOUT_MS=10000
-```
-
-Файл `.env` добавлен в `.gitignore`, поэтому реальные значения окружения не попадают в репозиторий.
-
-## Практика 3. Миграции базы данных
-
-Миграции запускаются отдельной командой:
+# Проверка задания 2
 
 ```bash
-npm run migrate
+docker build -t rcsp-task2-check .
+docker run --rm -d --name rcsp-task2-check -p 8080:8080 rcsp-task2-check
+until curl http://localhost:8080/health; do sleep 1; done
+curl http://localhost:8080/api/quote
+docker stop rcsp-task2-check
 ```
 
-Миграция:
+---
 
-- создает таблицу `quotes`, если ее еще нет;
-- создает демонстрационную таблицу `admins` для CLI-команды;
-- добавляет стартовые цитаты;
-- является идемпотентной: повторный запуск не ломает данные и не дублирует цитаты.
-
-## Практика 4. Stateless-приложение
-
-Приложение не хранит цитаты в памяти процесса. Endpoint `/api/quote` каждый раз читает случайную цитату из БД.
-
-При запуске через Docker Compose данные PostgreSQL сохраняются в volume `postgres_data`. Контейнер приложения можно пересоздать, а данные останутся:
+# Проверка задания 3
 
 ```bash
-docker compose restart app
-docker compose logs app
+docker build -t rcsp-config-check .
+docker run --rm -d --name rcsp-config-5000 -e PORT=5000 -e SERVICE_NAME=config-dev -p 5000:5000 rcsp-config-check
+until curl http://localhost:5000/health; do sleep 1; done
+docker stop rcsp-config-5000
+docker run --rm -d --name rcsp-config-5001 -e PORT=5001 -e SERVICE_NAME=config-prod -p 5001:5001 rcsp-config-check
+until curl http://localhost:5001/health; do sleep 1; done
+docker stop rcsp-config-5001
 ```
 
-Удалить данные PostgreSQL можно только вместе с volume:
+---
+
+# Проверка задания 4
 
 ```bash
-docker compose down -v
-```
+docker compose up -d --build --scale app=3
+until curl http://localhost:8080/health; do sleep 3; done
+curl http://localhost:8080/api/quote
+#docker compose ps
 
-## Практика 5. Docker
+APP=$(docker compose ps -q app | head -n 1)
+docker exec "$APP" npm run create-admin -- --email=stateless-demo@example.com
+docker compose exec -T postgres psql -U app_user -d quotes_db -c "select email from admins where email='stateless-demo@example.com';"
 
-Сборка образа:
+docker stop "$APP"
+curl http://localhost:8080/health
+curl http://localhost:8080/api/quote
 
-```bash
-docker build -t quote-demo-app .
-```
+docker compose stop app
+docker compose up -d --scale app=3
+until curl http://localhost:8080/health; do sleep 3; done
+docker compose exec -T postgres psql -U app_user -d quotes_db -c "select email from admins where email='stateless-demo@example.com';"
 
-Пример запуска образа со SQLite и Docker volume:
-
-```bash
-docker volume create quote-demo-sqlite
-docker run --rm -v quote-demo-sqlite:/app/data -e DB_CLIENT=sqlite quote-demo-app npm run migrate
-docker run --rm -p 8080:8080 -v quote-demo-sqlite:/app/data -e DB_CLIENT=sqlite quote-demo-app
-```
-
-Dockerfile использует `node:20-alpine`, устанавливает зависимости через `npm ci`, не копирует `.env` в образ и запускает сервер командой `npm run start`.
-
-## Практика 6. Docker Compose с PostgreSQL
-
-Сборка образа приложения:
-
-```bash
-docker compose build app
-```
-
-Запуск PostgreSQL:
-
-```bash
-docker compose up -d postgres
-```
-
-Запуск миграций в контейнере приложения:
-
-```bash
-docker compose run --rm app npm run migrate
-```
-
-Запуск всего приложения:
-
-```bash
-docker compose up -d
-```
-
-Открыть приложение: [http://localhost:8080](http://localhost:8080)
-
-Остановить контейнеры без удаления данных:
-
-```bash
 docker compose down
 ```
-
-## Практика 7. Масштабирование
-
-У приложения нет фиксированного проброса порта на каждый контейнер `app`, потому что один и тот же порт `8080` нельзя одновременно привязать к нескольким контейнерам на хосте.
-
-В Compose добавлен простой `nginx`, который публикует `localhost:8080` и проксирует запросы в сервис `app`. Поэтому можно запустить несколько экземпляров приложения:
-
-```bash
-docker compose build app
-docker compose up -d postgres
-docker compose run --rm app npm run migrate
-docker compose up -d --scale app=3
-docker compose ps
-```
-
-Для браузера адрес остается тем же: [http://localhost:8080](http://localhost:8080)
-
-## Практика 8. Структурное JSON-логирование
-
-Логи пишутся только в stdout/stderr, без файлов:
-
-```bash
-docker compose logs app
-```
-
-Пример записи:
-
-```json
-{"timestamp":"2026-05-01T12:00:00.000Z","level":"info","service":"quote-demo-app","requestId":"demo-123","method":"GET","path":"/api/quote","statusCode":200,"durationMs":4.25,"message":"HTTP request completed"}
-```
-
-## Практика 9. Request ID
-
-Если клиент передает `X-Request-ID`, приложение использует его. Если заголовка нет, приложение генерирует UUID.
-
-```bash
-curl -H "X-Request-ID: demo-123" http://localhost:8080/api/quote
-```
-
-Ответ также содержит заголовок `X-Request-ID`, а значение попадает в JSON-логи.
-
-## Практика 10. Graceful shutdown
-
-Endpoint `/slow` отвечает через 5 секунд и помогает проверить, что начатый запрос успевает завершиться при остановке сервера.
-
-Локальная проверка:
-
-```bash
-curl http://localhost:8080/slow
-```
-
-Пока запрос выполняется, нажмите `Ctrl+C` в терминале с `npm run start`. Сервер перестанет принимать новые запросы, дождется активного запроса в пределах `SHUTDOWN_TIMEOUT_MS`, закроет БД и выведет JSON-лог завершения.
-
-Проверка в Docker Compose:
-
-```bash
-curl http://localhost:8080/slow
-docker compose stop app
-```
-
-## Практика 11. Одноразовые административные процессы
-
-CLI-команда для демонстрации одноразового процесса:
-
-```bash
-npm run create-admin -- --email=admin@example.com
-```
-
-В Docker Compose:
-
-```bash
-docker compose run --rm app npm run create-admin -- --email=admin@example.com
-```
-
-Команда идемпотентна: повторный запуск с тем же email не создает дубликат.
-
-## Практика 12. GitHub Actions
-
-Workflow находится в `.github/workflows/ci.yml`.
-
-Он выполняет:
-
-```bash
-npm ci
-npm run lint
-npm test
-```
-
-Это демонстрирует базовую CI-проверку проекта на Node.js.
-
-## Структура проекта
-
-```text
-src/
-  app.js
-  server.js
-  cli.js
-  config/
-  db/
-  middleware/
-  public/
-  repositories/
-  routes/
-  services/
-```
-
-Разделение сделано по ролям: routes отвечают за HTTP, services за бизнес-логику, repositories за данные, db за подключение и миграции, middleware за request ID и логирование.

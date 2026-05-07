@@ -60,6 +60,7 @@ async function start() {
     log('info', 'Server started', {
       port: config.port,
       appVersion: config.appVersion,
+      instanceId: config.instanceId,
       nodeEnv: config.nodeEnv,
       dbClient: config.dbClient
     });

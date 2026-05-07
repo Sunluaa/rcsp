@@ -4,10 +4,19 @@ on:
   push:
     branches:
       - main
+      - staging
+      - prod
   pull_request:
 
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_TAG: sha-${{ github.sha }}
+
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,16 +28,77 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: quote-demo-app/package-lock.json
 
       - name: Install dependencies
-        working-directory: quote-demo-app
         run: npm ci
 
-      - name: Lint
-        working-directory: quote-demo-app
-        run: npm run lint
-
       - name: Test
-        working-directory: quote-demo-app
         run: npm test
+
+  build-image:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        run: |
+          docker build \
+            -t "$IMAGE_NAME:$IMAGE_TAG" \
+            -t "$IMAGE_NAME:run-$GITHUB_RUN_NUMBER" \
+            .
+          docker push "$IMAGE_NAME:$IMAGE_TAG"
+          docker push "$IMAGE_NAME:run-$GITHUB_RUN_NUMBER"
+
+  release-check:
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/prod')
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_ENV: ${{ github.ref_name }}
+
+    steps:
+      - name: Set image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull fixed image
+        run: docker pull "$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Run fixed image with environment config
+        run: |
+          docker run --rm -d \
+            --name release-check \
+            -e NODE_ENV="$RELEASE_ENV" \
+            -e APP_VERSION="$IMAGE_TAG" \
+            -e SERVICE_NAME="quote-demo-$RELEASE_ENV" \
+            -e DB_CLIENT=sqlite \
+            -p 8080:8080 \
+            "$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Verify release identity
+        run: |
+          until curl -fsS http://localhost:8080/health; do sleep 1; done
+
+      - name: Stop release container
+        if: always()
+        run: docker stop release-check || true

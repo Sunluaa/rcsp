@@ -36,7 +36,7 @@ docker stop rcsp-config-5001
 
 ---
 
-# Проверка задания 4
+# Проверка задания 4уу
 
 ```bash
 docker compose up -d --build --scale app=3

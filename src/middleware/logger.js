@@ -28,6 +28,7 @@ function log(level, message, meta = {}) {
     level,
     service: config.serviceName,
     requestId: meta.requestId,
+    quoteId: meta.quoteId,
     method: meta.method,
     path: meta.path,
     statusCode: meta.statusCode,

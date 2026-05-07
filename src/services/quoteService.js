@@ -1,6 +1,7 @@
 const quoteRepository = require('../repositories/quoteRepository');
+const { log } = require('../middleware/logger');
 
-async function getRandomQuote() {
+async function getRandomQuote(requestId) {
   const quote = await quoteRepository.findRandomQuote();
 
   if (!quote) {
@@ -8,6 +9,11 @@ async function getRandomQuote() {
     error.statusCode = 404;
     throw error;
   }
+
+  log('info', 'Quote selected', {
+    requestId,
+    quoteId: quote.id
+  });
 
   return quote;
 }

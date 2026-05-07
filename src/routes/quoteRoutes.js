@@ -5,7 +5,7 @@ const router = express.Router();
 
 router.get('/quote', async (req, res, next) => {
   try {
-    const quote = await quoteService.getRandomQuote();
+    const quote = await quoteService.getRandomQuote(req.requestId);
     res.json(quote);
   } catch (error) {
     next(error);

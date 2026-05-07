@@ -2,6 +2,7 @@ const { connectDatabase, closeDatabase } = require('./db/database');
 const { runMigrations } = require('./db/migrations');
 const quoteRepository = require('./repositories/quoteRepository');
 const { log } = require('./middleware/logger');
+const { startServer } = require('./server');
 
 function parseArgs(args) {
   return args.reduce((parsedArgs, arg) => {
@@ -19,8 +20,9 @@ function parseArgs(args) {
 function printHelp() {
   process.stdout.write([
     'Usage:',
-    '  npm run migrate',
-    '  npm run create-admin -- --email=admin@example.com',
+    '  node src/cli.js server',
+    '  node src/cli.js migrate',
+    '  node src/cli.js create-admin --email=admin@example.com',
     ''
   ].join('\n'));
 }
@@ -43,11 +45,16 @@ async function createAdmin(args) {
 }
 
 async function main() {
-  const command = process.argv[2];
+  const command = process.argv[2] || 'server';
   const args = parseArgs(process.argv.slice(3));
 
-  if (!command || command === 'help' || command === '--help') {
+  if (command === 'help' || command === '--help') {
     printHelp();
+    return;
+  }
+
+  if (command === 'server') {
+    await startServer();
     return;
   }
 

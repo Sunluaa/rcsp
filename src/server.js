@@ -6,6 +6,7 @@ const { log } = require('./middleware/logger');
 let server;
 let isShuttingDown = false;
 const openSockets = new Set();
+let startPromise;
 
 async function shutdown(signal) {
   if (isShuttingDown) {
@@ -29,58 +30,87 @@ async function shutdown(signal) {
 
   forceShutdownTimer.unref();
 
-  server.close(async (error) => {
-    if (error) {
-      log('error', 'HTTP server closed with error', {
-        signal,
-        error: error.message
-      });
-    }
+  const beginClosingServer = () => {
+    server.close(async (error) => {
+      if (error) {
+        log('error', 'HTTP server closed with error', {
+          signal,
+          error: error.message
+        });
+      }
 
-    try {
-      await closeDatabase();
-      clearTimeout(forceShutdownTimer);
-      log('info', 'Graceful shutdown completed', { signal });
-      process.exit(error ? 1 : 0);
-    } catch (closeError) {
-      clearTimeout(forceShutdownTimer);
-      log('error', 'Database close failed during shutdown', {
-        signal,
-        error: closeError.message
-      });
-      process.exit(1);
-    }
+      try {
+        await closeDatabase();
+        clearTimeout(forceShutdownTimer);
+        log('info', 'Graceful shutdown completed', { signal });
+        process.exit(error ? 1 : 0);
+      } catch (closeError) {
+        clearTimeout(forceShutdownTimer);
+        log('error', 'Database close failed during shutdown', {
+          signal,
+          error: closeError.message
+        });
+        process.exit(1);
+      }
+    });
+  };
+
+  log('info', 'Shutdown drain started', {
+    signal,
+    durationMs: config.shutdownDrainMs
   });
+
+  if (config.shutdownDrainMs > 0) {
+    const drainTimer = setTimeout(beginClosingServer, config.shutdownDrainMs);
+    drainTimer.unref();
+    return;
+  }
+
+  beginClosingServer();
 }
 
-async function start() {
-  await connectDatabase();
+async function startServer() {
+  if (startPromise) {
+    return startPromise;
+  }
 
-  server = app.listen(config.port, '0.0.0.0', () => {
-    log('info', 'Server started', {
-      port: config.port,
-      appVersion: config.appVersion,
-      instanceId: config.instanceId,
-      nodeEnv: config.nodeEnv,
-      dbClient: config.dbClient
+  startPromise = (async () => {
+    await connectDatabase();
+
+    server = app.listen(config.port, '0.0.0.0', () => {
+      log('info', 'Server started', {
+        port: config.port,
+        appVersion: config.appVersion,
+        instanceId: config.instanceId,
+        nodeEnv: config.nodeEnv,
+        dbClient: config.dbClient
+      });
     });
-  });
 
-  server.on('connection', (socket) => {
-    openSockets.add(socket);
-    socket.on('close', () => {
-      openSockets.delete(socket);
+    server.on('connection', (socket) => {
+      openSockets.add(socket);
+      socket.on('close', () => {
+        openSockets.delete(socket);
+      });
     });
-  });
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  })();
+
+  return startPromise;
 }
 
-start().catch((error) => {
-  log('error', 'Server failed to start', {
-    error: error.message,
-    stack: config.nodeEnv === 'production' ? undefined : error.stack
+module.exports = {
+  startServer
+};
+
+if (require.main === module) {
+  startServer().catch((error) => {
+    log('error', 'Server failed to start', {
+      error: error.message,
+      stack: config.nodeEnv === 'production' ? undefined : error.stack
+    });
+    process.exit(1);
   });
-  process.exit(1);
-});
+}

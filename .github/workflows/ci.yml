@@ -119,16 +119,48 @@ jobs:
       - name: Pull fixed image
         run: docker pull "$IMAGE_NAME:$RELEASE_IMAGE_TAG"
 
+      - name: Create release network
+        run: docker network create release-net
+
+      - name: Start target environment database
+        run: |
+          docker run -d \
+            --name release-postgres \
+            --network release-net \
+            --network-alias postgres \
+            -e POSTGRES_USER=app_user \
+            -e POSTGRES_PASSWORD=app_password \
+            -e POSTGRES_DB=quotes_db \
+            postgres:16-alpine
+
+      - name: Wait for target environment database
+        run: |
+          until docker exec release-postgres pg_isready -U app_user -d quotes_db; do
+            sleep 1
+          done
+
+      - name: Run database migrations from the release image
+        run: |
+          docker run --rm \
+            --network release-net \
+            --env-file "$RELEASE_ENV_FILE" \
+            -e NODE_ENV="$RELEASE_ENV" \
+            -e APP_VERSION="$RELEASE_IMAGE_TAG" \
+            "$IMAGE_NAME:$RELEASE_IMAGE_TAG" \
+            migrate
+
       - name: Run fixed image with environment config
         run: |
           docker run --rm -d \
             --name release-check \
+            --network release-net \
             --env-file "$RELEASE_ENV_FILE" \
             -e NODE_ENV="$RELEASE_ENV" \
             -e APP_VERSION="$RELEASE_IMAGE_TAG" \
             -e RELEASE_IMAGE_TAG="$RELEASE_IMAGE_TAG" \
             -p 8080:8080 \
-            "$IMAGE_NAME:$RELEASE_IMAGE_TAG"
+            "$IMAGE_NAME:$RELEASE_IMAGE_TAG" \
+            server
 
       - name: Verify release identity
         run: |
@@ -143,3 +175,11 @@ jobs:
       - name: Stop release container
         if: always()
         run: docker stop release-check || true
+
+      - name: Stop target environment database
+        if: always()
+        run: docker stop release-postgres || true
+
+      - name: Remove release network
+        if: always()
+        run: docker network rm release-net || true

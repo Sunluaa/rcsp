@@ -41,5 +41,6 @@ module.exports = {
   ),
   sqliteFile: path.resolve(readString('SQLITE_FILE', './data/app.db')),
   logLevel: readString('LOG_LEVEL', 'info').toLowerCase(),
+  shutdownDrainMs: readNumber('SHUTDOWN_DRAIN_MS', 2000),
   shutdownTimeoutMs: readNumber('SHUTDOWN_TIMEOUT_MS', 10000)
 };

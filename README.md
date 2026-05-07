@@ -59,3 +59,6 @@ docker compose exec -T postgres psql -U app_user -d quotes_db -c "select email f
 
 docker compose down
 ```
+
+
+add new line

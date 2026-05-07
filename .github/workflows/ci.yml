@@ -12,9 +12,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE_TAG: sha-${{ github.sha }}
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -44,8 +41,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set image name
-        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - name: Set image metadata
+        run: |
+          echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=sha-${GITHUB_SHA}" >> "$GITHUB_ENV"
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -63,7 +62,12 @@ jobs:
           docker push "$IMAGE_NAME:$IMAGE_TAG"
           docker push "$IMAGE_NAME:run-$GITHUB_RUN_NUMBER"
 
-  release-check:
+      - name: Print build release identity
+        run: |
+          echo "Built image: $IMAGE_NAME:$IMAGE_TAG"
+          echo "Build run tag: $IMAGE_NAME:run-$GITHUB_RUN_NUMBER"
+
+  deploy-release:
     needs: test
     if: github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/prod')
     runs-on: ubuntu-latest
@@ -71,8 +75,39 @@ jobs:
       RELEASE_ENV: ${{ github.ref_name }}
 
     steps:
-      - name: Set image name
-        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set release metadata
+        run: |
+          TAG_FILE="deploy/${RELEASE_ENV}.image-tag"
+          ENV_FILE="deploy/${RELEASE_ENV}.env"
+
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "Missing image tag file: $TAG_FILE" >&2
+            exit 1
+          fi
+
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "Missing environment file: $ENV_FILE" >&2
+            exit 1
+          fi
+
+          RELEASE_IMAGE_TAG="$(tr -d '\r\n' < "$TAG_FILE")"
+
+          if [ -z "$RELEASE_IMAGE_TAG" ]; then
+            echo "Release image tag is empty in $TAG_FILE" >&2
+            exit 1
+          fi
+
+          if [ "$RELEASE_IMAGE_TAG" = "sha-promote-me" ]; then
+            echo "Update $TAG_FILE with an existing image tag built on main before deploying." >&2
+            exit 1
+          fi
+
+          echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "RELEASE_IMAGE_TAG=$RELEASE_IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_ENV_FILE=$ENV_FILE" >> "$GITHUB_ENV"
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -82,22 +117,28 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull fixed image
-        run: docker pull "$IMAGE_NAME:$IMAGE_TAG"
+        run: docker pull "$IMAGE_NAME:$RELEASE_IMAGE_TAG"
 
       - name: Run fixed image with environment config
         run: |
           docker run --rm -d \
             --name release-check \
+            --env-file "$RELEASE_ENV_FILE" \
             -e NODE_ENV="$RELEASE_ENV" \
-            -e APP_VERSION="$IMAGE_TAG" \
-            -e SERVICE_NAME="quote-demo-$RELEASE_ENV" \
-            -e DB_CLIENT=sqlite \
+            -e APP_VERSION="$RELEASE_IMAGE_TAG" \
+            -e RELEASE_IMAGE_TAG="$RELEASE_IMAGE_TAG" \
             -p 8080:8080 \
-            "$IMAGE_NAME:$IMAGE_TAG"
+            "$IMAGE_NAME:$RELEASE_IMAGE_TAG"
 
       - name: Verify release identity
         run: |
-          until curl -fsS http://localhost:8080/health; do sleep 1; done
+          until curl -fsS http://localhost:8080/health > health.json; do sleep 1; done
+          cat health.json
+          grep -q "\"environment\":\"$RELEASE_ENV\"" health.json
+          grep -q "\"version\":\"$RELEASE_IMAGE_TAG\"" health.json
+
+      - name: Print release logs
+        run: docker logs release-check
 
       - name: Stop release container
         if: always()
